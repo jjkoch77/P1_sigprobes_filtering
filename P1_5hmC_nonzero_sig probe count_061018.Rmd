@@ -1,0 +1,211 @@
+## R Markdown
+
+---
+title: "5-hmC non-zero probe count 061018"
+author: "Joe Kochmanski"
+output:
+  html_document:
+    code_folding: hide
+    fig_height: 2.5
+    fig_width: 3.5
+    highlight: tango
+    toc: yes
+    toc_float: yes
+---
+## Project summary
+
+This script intersects and counts significant probes and probes from filtered oxBS-MLE beta data.
+
+1. Import the raw beta values from oxBS-MLE output and the output from glmmTMB and gamlss for EPIC data (significant probes).
+2. Filter raw beta values down to only probes with non-zero values
+3. Intersect significant probes with filtered beta probes
+4. Save and explore remaining probe list
+5. Filter raw beta values down to probes with at least three non-zero values in one disease group.
+6. Intersect significant probes with filtered beta probes
+7. Save and explore remaining probe list
+
+## Load required packages        
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE, results='hide'}
+library(dplyr)
+library(knitr)
+library(ggplot2)
+```
+
+## 1. Load data
+```{r Load data, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+load("./oxBSMLE_betas.RData")
+load("./5hmC/fivehmc_glialadjusted_nopmi_cingulate.RData")
+load("./5hmC/fivehmc_glialadjusted_nopmi_parietal.RData")
+```
+
+
+## 2. Filter data
+Filter glmmTMB and gamlss output for probes with FDR < 0.01 and a greater than 2-fold change in the odds ratio (> 2 or < 0.5) such that log(odds) > 0.6931472 or < -0.6931472. Exclude hmC probes with standard error greater than 10 to remove the subpopulation of probes with standard errors in the 10000s. These are poorly modeled in this analysis.
+
+```{r Filter data by FDR, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+hmc.c.mid.sig <- hydroxymethylcyto.all.cing.mid.nopmi %>% filter(fdr < 0.01 & `Std. Error` < 10, Estimate < -0.6931472 | Estimate > 0.6931472)
+hmc.c.late.sig <- hydroxymethylcyto.all.cing.late.nopmi %>% filter(fdr < 0.01 & `Std. Error` < 10, Estimate < -0.6931472 | Estimate > 0.6931472)
+hmc.p.mid.sig <- hydroxymethylcyto.all.pari.mid.nopmi %>% filter(fdr < 0.01 & `Std. Error` < 10, Estimate < -0.6931472 | Estimate > 0.6931472)
+hmc.p.late.sig <- hydroxymethylcyto.all.pari.late.nopmi %>% filter(fdr < 0.01& `Std. Error` < 10, Estimate < -0.6931472 | Estimate > 0.6931472)
+```
+
+## Also filter oxBS-MLE beta values to remove zeros from data 
+
+```{r Create data.frames of the 5-hmC beta data, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+hydroxy_mC_C = as.data.frame(hydroxymethylcyto.c) #766212 probes
+hydroxy_mC_P = as.data.frame(hydroxymethylcyto.p) #774831 probes
+```
+
+```{r Go through each row and determine if a beta value is zero, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+row_sub = apply(hydroxy_mC_C, 1, function(row) all(row !=0 ))
+row_sub1 = apply(hydroxy_mC_P, 1, function(row) all(row !=0 ))
+```
+
+```{r Subset the beta data to remove rows with zeros, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+hydroxy_C_nonzero <- hydroxy_mC_C[row_sub,] #Removes all rows w/ zero as a value.
+hydroxy_P_nonzero <- hydroxy_mC_P[row_sub1,] #Removes all rows w/ zero as a value.
+```
+
+## 3. Intersect and Count Non-zero Probes
+
+### Intersect data to generate filtered data.frame
+```{r Merge data.frames for filtered 5hmC beta data and significant probes using "Probe" column, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+hmc.c.late.sig.nonzero.merged <- merge(hydroxy_C_nonzero, hmc.c.late.sig, by=c("Probe")) #4806 probes
+hmc.c.mid.sig.nonzero.merged <- merge(hydroxy_C_nonzero, hmc.c.mid.sig, by=c("Probe")) #2439 probes
+hmc.p.late.sig.nonzero.merged <- merge(hydroxy_P_nonzero, hmc.p.late.sig, by=c("Probe")) #2314 probes
+hmc.p.mid.sig.nonzero.merged <- merge(hydroxy_P_nonzero, hmc.p.mid.sig, by=c("Probe")) #3185 probes
+```
+
+### Count intersecting non-zero probes by stage
+```{r Separate probe modifications in mid stage, late stage, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+library(dplyr)
+c.mid.hmc.nonzero <- dplyr::intersect(hydroxy_C_nonzero$Probe, hmc.c.mid.sig$Probe)
+p.mid.hmc.nonzero <- dplyr::intersect(hydroxy_P_nonzero$Probe, hmc.p.mid.sig$Probe)
+
+c.late.hmc.nonzero <- dplyr::intersect(hydroxy_C_nonzero$Probe, hmc.c.late.sig$Probe)
+p.late.hmc.nonzero <- dplyr::intersect(hydroxy_P_nonzero$Probe, hmc.c.late.sig$Probe)
+
+c.mid.hmc.counts <- as.numeric(c(length(c.mid.hmc.nonzero)))
+c.late.hmc.counts <- as.numeric(c(length(c.late.hmc.nonzero)))
+p.mid.hmc.counts <- as.numeric(c(length(p.mid.hmc.nonzero)))
+p.late.hmc.counts <- as.numeric(c(length(p.late.hmc.nonzero)))
+probe_counts <- data.frame(c.mid.hmc.counts,c.late.hmc.counts,p.mid.hmc.counts,p.late.hmc.counts)
+names(probe_counts) <- c("Cingulate-Mid","Cingulate-Late","Parietal-Mid","Parietal-Late")
+row.names(probe_counts) <- c("5hmC non-zero significant probes")                         
+kable(probe_counts) #Creates table
+```
+
+##4. Save and Explore Data
+
+```{r Save probes sorted by stage as RData, echo=FALSE, warning=FALSE, message=FALSE, cache=FALSE}
+save(hmc.cing.late.nonzero.merged,hmc.cing.mid.nonzero.merged,hmc.pari.late.nonzero.merged,hmc.pari.mid.nonzero.merged, file = "./sig.hmc.nonzero.stage.RData")
+```
+
+```{r Save probes sorted by stage as .csv files, echo=FALSE, warning=FALSE, message=FALSE, cache=FALSE}
+write.csv(hmc.cing.late.nonzero.merged, "./P1_Cing_Late_Nonzero_Merged_SigProbes_061018.csv")
+write.csv(hmc.cing.mid.nonzero.merged, "./P1_Cing_Mid_Nonzero_Merged_SigProbes_061018.csv")
+write.csv(hmc.pari.late.nonzero.merged, "./P1_Pari_Late_Nonzero_Merged_SigProbes_061018.csv")
+write.csv(hmc.pari.mid.nonzero.merged, "./P1_Pari_Mid_Nonzero_Merged_SigProbes_061018.csv")
+```
+
+
+##5. Filter oxBS mle estimates of 5hmc to only probes that had 3 non-zero values in at least one disease stage.
+
+```{r Create data.frames of the 5-hmC beta data, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+#To examine number of non-zero probes in each disease stage, split 5-hmC #data.frames into 5-hmC beta data for each disease stage.
+hydroxy_mC_C_1 = hydroxy_mC_C[1:3] #766212 probes
+hydroxy_mC_C_2 = hydroxy_mC_C[4:6] 
+hydroxy_mC_C_3 = hydroxy_mC_C[7:9] 
+
+hydroxy_mC_P_1 = hydroxy_mC_P[1:3] #774831 probes
+hydroxy_mC_P_2 = hydroxy_mC_P[4:6] 
+hydroxy_mC_P_3 = hydroxy_mC_P[7:9] 
+```
+
+```{r Go through each row and determine if a value is zero, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+row_sub_C_1 = apply(hydroxy_mC_C_1, 1, function(row) all(row !=0 ))
+row_sub_P_1 = apply(hydroxy_mC_P_1, 1, function(row) all(row !=0 ))
+
+row_sub_C_2 = apply(hydroxy_mC_C_2, 1, function(row) all(row !=0 ))
+row_sub_P_2 = apply(hydroxy_mC_P_2, 1, function(row) all(row !=0 ))
+
+row_sub_C_3 = apply(hydroxy_mC_C_3, 1, function(row) all(row !=0 ))
+row_sub_P_3 = apply(hydroxy_mC_P_3, 1, function(row) all(row !=0 ))
+```
+
+```{r Subset the data to remove rows with zeros, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+
+hydroxy_C_1_nonzero <- hydroxy_mC_C_1[row_sub_C_1,] #Removes all rows w/ zero as a value.
+#613543 probes
+hydroxy_C_2_nonzero <- hydroxy_mC_C_2[row_sub_C_2,] #Removes all rows w/ zero as a value.
+#616237 probes
+hydroxy_C_3_nonzero <- hydroxy_mC_C_3[row_sub_C_3,] #Removes all rows w/ zero as a value.
+#568130 probes
+
+hydroxy_P_1_nonzero <- hydroxy_mC_P_1[row_sub_P_1,] #Removes all rows w/ zero as a value.
+#622871 probes
+hydroxy_P_2_nonzero <- hydroxy_mC_P_2[row_sub_P_2,] #Removes all rows w/ zero as a value.
+#595627 probes
+hydroxy_P_3_nonzero <- hydroxy_mC_P_3[row_sub_P_3,] #Removes all rows w/ zero as a value.
+#627211 probes
+```
+
+```{r Move 5-hmC beta data probe row names to new column for matching w/ significant probes, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+
+hydroxy_P_1_nonzero$Probe <- rownames(hydroxy_P_1_nonzero)
+hydroxy_P_2_nonzero$Probe <- rownames(hydroxy_P_2_nonzero)
+hydroxy_P_3_nonzero$Probe <- rownames(hydroxy_P_3_nonzero)
+#Note: "Probe" matches column name in sig probes outputs
+hydroxy_C_1_nonzero$Probe <- rownames(hydroxy_C_1_nonzero) 
+hydroxy_C_2_nonzero$Probe <- rownames(hydroxy_C_2_nonzero) 
+hydroxy_C_3_nonzero$Probe <- rownames(hydroxy_C_3_nonzero) 
+```
+
+```{r Merge filtered non-zero probes across disease stages for cing and pari, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+#NOTE: all=TRUE keeps all unique rows after merging, eventually giving a complete set of probes with at least one disease stage with 3 non-zero values.
+hydroxy_P_nonzero_merged <- merge(hydroxy_P_1_nonzero, hydroxy_P_2_nonzero, all=TRUE)
+hydroxy_P_all_nonzero_merged <- merge(hydroxy_P_nonzero_merged, hydroxy_P_3_nonzero, all=TRUE)
+#696124 probes
+
+hydroxy_C_nonzero_merged <- merge(hydroxy_C_1_nonzero, hydroxy_C_2_nonzero, all=TRUE)
+hydroxy_C_all_nonzero_merged <- merge(hydroxy_C_nonzero_merged, hydroxy_C_3_nonzero, all=TRUE)
+#680709 probes
+```
+
+```{r Merge data.frames for filtered 5hmC beta data and significant probes using "Probe" column, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+hmc.cing.late.3nonzero.merged <- merge(hydroxy_C_all_nonzero_merged, hmc.c.late.sig, by=c("Probe")) #10398
+hmc.cing.mid.3nonzero.merged <- merge(hydroxy_C_all_nonzero_merged, hmc.c.mid.sig, by=c("Probe")) #7739
+hmc.pari.late.3nonzero.merged <- merge(hydroxy_P_all_nonzero_merged, hmc.p.late.sig, by=c("Probe")) #8083
+hmc.pari.mid.3nonzero.merged <- merge(hydroxy_P_all_nonzero_merged, hmc.p.mid.sig, by=c("Probe")) #8712
+```
+
+##4. Save and Explore Data
+
+```{r Merge data.frames for filtered 5hmC beta data and significant probes using "Probe" column, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+#Save merged data.frames as Rdata file:
+save(hmc.cing.late.3nonzero.merged,hmc.cing.mid.3nonzero.merged,hmc.pari.late.3nonzero.merged,hmc.pari.mid.3nonzero.merged, file = "./sig.hmc.3nonzero.in.1stage.RData")
+
+#Write .csv files of each separate merged data.frame
+write.csv(hmc.cing.late.3nonzero.merged, "./P1_Cing_Late_3Nonzero_in_OneStage_SigProbes_061018.csv")
+write.csv(hmc.cing.mid.3nonzero.merged, "./P1_Cing_Mid_3Nonzero_in_OneStage_SigProbes_061018.csv")
+write.csv(hmc.pari.late.3nonzero.merged, "./P1_Pari_Late_3Nonzero_in_OneStage_SigProbes_061018.csv")
+write.csv(hmc.pari.mid.3nonzero.merged, "./P1_Pari_Mid_3Nonzero_in_OneStage_SigProbes_061018.csv")
+```
+
+```{r Count probes that intersect between the significant probes and filtered beta data, echo=TRUE, warning=FALSE, message=FALSE, cache=FALSE}
+library(dplyr)
+c.mid.hmc.3nonzero <- dplyr::intersect(hydroxy_C_all_nonzero_merged$Probe, hmc.c.mid.sig$Probe)
+p.mid.hmc.3nonzero <- dplyr::intersect(hydroxy_P_all_nonzero_merged$Probe, hmc.p.mid.sig$Probe)
+
+c.late.hmc.3nonzero <- dplyr::intersect(hydroxy_C_all_nonzero_merged$Probe, hmc.c.late.sig$Probe)
+p.late.hmc.3nonzero <- dplyr::intersect(hydroxy_P_all_nonzero_merged$Probe, hmc.p.late.sig$Probe)
+
+c.mid.hmc.counts <- as.numeric(c(length(c.mid.hmc.3nonzero)))
+c.late.hmc.counts <- as.numeric(c(length(c.late.hmc.3nonzero)))
+p.mid.hmc.counts <- as.numeric(c(length(p.mid.hmc.3nonzero)))
+p.late.hmc.counts <- as.numeric(c(length(p.late.hmc.3nonzero)))
+probe_counts <- data.frame(c.mid.hmc.counts,c.late.hmc.counts,p.mid.hmc.counts,p.late.hmc.counts)
+names(probe_counts) <- c("Cingulate-Mid","Cingulate-Late","Parietal-Mid","Parietal-Late")
+row.names(probe_counts) <- c("5hmC non-zero (at least 3 in one stage) probes")
+kable(probe_counts) #Creates table for Rmarkdown output -- pretty nifty!
+```
